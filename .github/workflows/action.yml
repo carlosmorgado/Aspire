@@ -1,0 +1,101 @@
+name: Build & Release
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - develop
+
+jobs:
+  sem_ver:
+    name: GitVersion
+    runs-on: ubuntu-latest
+    outputs:
+      fullSemVer: ${{ steps.version_step.outputs.fullSemVer }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@v3.0.0
+        with:
+          versionSpec: '6.x'
+
+      - name: Determine Version
+        id: version_step
+        uses: gittools/actions/gitversion/execute@v3.0.0
+
+  build:
+    needs: sem_ver
+    runs-on: ubuntu-latest
+    env:
+      package_version: ${{ needs.sem_ver.outputs.fullSemVer }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Publish
+        run: dotnet publish --no-build
+
+      - name: Pack
+        run: dotnet pack --no-build --configuration Release /p:Version=$VERSION --output ./Packages
+        env:
+          VERSION: ${{ env.package_version }}
+
+      - name: Upload a Build Artifact
+        uses: actions/upload-artifact@v4.0.0
+        with:
+          name: NugetPackage
+          path: Packages/
+
+  release:
+    needs:
+      - build
+      - sem_ver
+    runs-on: ubuntu-latest
+    env:
+      package_version: ${{ needs.sem_ver.outputs.fullSemVer }}
+    steps:
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Download a Build Artifact
+        uses: actions/download-artifact@v4.1.0
+        with:
+          name: NugetPackage
+          path: ./
+
+      - name: Test
+        run: echo ${{ secrets.PACKAGE_REGISTRY_TOKEN }}
+
+      - name: Push
+        run: dotnet nuget push **/*.nupkg --api-key ${{ secrets.PACKAGE_REGISTRY_TOKEN }} --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+
+      - name: Create Tag
+        run: |
+          # Set the new tag
+          git tag $VERSION --force
+
+          # Save Tag
+          git push origin --tags --force
+
+        env:
+          VERSION: ${{ env.package_version }}
