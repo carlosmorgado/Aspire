@@ -89,6 +89,9 @@ jobs:
       - name: Push
         run: dotnet nuget push **/*.nupkg --api-key ${{ secrets.PACKAGE_REGISTRY_TOKEN }} --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
 
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Create Tag
         run: |
           # Set the new tag
